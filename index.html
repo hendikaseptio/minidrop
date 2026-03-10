@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DropWave — P2P File Sharing</title>
+
+<!-- PeerJS for signaling + WebRTC -->
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<style>
+/* ============================================================
+   DESIGN TOKENS & RESET
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap');
+
+:root {
+  --bg:        #04080f;
+  --surface:   #080f1c;
+  --panel:     #0b1526;
+  --border:    #1a2f50;
+  --radar-1:   rgba(0, 255, 180, 0.08);
+  --radar-2:   rgba(0, 255, 180, 0.04);
+  --accent:    #00ffb4;
+  --accent2:   #00cfff;
+  --warn:      #ff6b35;
+  --text:      #c8e0f4;
+  --text-dim:  #4a6a8a;
+  --mono:      'Share Tech Mono', monospace;
+  --sans:      'Exo 2', sans-serif;
+  --radius:    12px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+#app {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 1fr 320px;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: relative;
+  z-index: 10;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  text-shadow: 0 0 20px var(--accent);
+}
+
+.logo span { color: var(--accent2); }
+
+#my-id-display {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+#my-id-display strong {
+  color: var(--accent2);
+  cursor: pointer;
+  user-select: all;
+}
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+  transition: background 0.4s, box-shadow 0.4s;
+  display: inline-block;
+  margin-right: 8px;
+}
+.status-dot.online {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: pulse-dot 2s infinite;
+}
+@keyframes pulse-dot {
+  0%,100% { opacity:1; } 50% { opacity:0.5; }
+}
+
+/* ============================================================
+   RADAR AREA
+   ============================================================ */
+#radar-area {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, #060e1c 0%, var(--bg) 75%);
+}
+
+/* Grid background */
+#radar-area::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.25;
+}
+
+/* Radar rings */
+.radar-wrap {
+  position: relative;
+  width: min(70vw, 500px);
+  height: min(70vw, 500px);
+}
+
+.radar-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(0,255,180,0.18);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.radar-ring:nth-child(1) { width:100%; height:100%; border-color: rgba(0,255,180,0.22); }
+.radar-ring:nth-child(2) { width:66%; height:66%; border-color: rgba(0,255,180,0.16); }
+.radar-ring:nth-child(3) { width:33%; height:33%; border-color: rgba(0,255,180,0.12); }
+
+/* Crosshairs */
+.crosshair-h, .crosshair-v {
+  position: absolute;
+  background: rgba(0,255,180,0.1);
+  top: 50%; left: 50%;
+}
+.crosshair-h { width:100%; height:1px; transform: translate(-50%,-50%); }
+.crosshair-v { width:1px; height:100%; transform: translate(-50%,-50%); }
+
+/* Sweeping radar line */
+.radar-sweep {
+  position: absolute;
+  width: 50%; height: 2px;
+  top: 50%; left: 50%;
+  transform-origin: 0% 50%;
+  background: linear-gradient(90deg, transparent, rgba(0,255,180,0.9));
+  animation: sweep 3s linear infinite;
+  border-radius: 0 2px 2px 0;
+}
+.radar-sweep::after {
+  content: '';
+  position: absolute;
+  top: -40px; left: 0; right: 0;
+  height: 80px;
+  background: conic-gradient(from -20deg at 0% 50%, transparent 0deg, rgba(0,255,180,0.12) 60deg, transparent 80deg);
+  transform-origin: 0% 50%;
+}
+@keyframes sweep {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Center dot */
+.radar-center {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 20px var(--accent), 0 0 40px rgba(0,255,180,0.4);
+  z-index: 5;
+  cursor: default;
+}
+
+/* Device icons on radar */
+.peer-dot {
+  position: absolute;
+  width: 42px; height: 42px;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 10;
+  transition: filter 0.2s;
+}
+.peer-dot:hover .peer-icon { transform: scale(1.2); border-color: var(--accent); }
+.peer-dot:hover .peer-label { opacity: 1; }
+
+.peer-icon {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--accent2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem;
+  transition: all 0.2s;
+  box-shadow: 0 0 12px rgba(0,207,255,0.3);
+  position: relative;
+}
+.peer-icon.connected {
+  border-color: var(--accent);
+  box-shadow: 0 0 18px rgba(0,255,180,0.5);
+}
+.peer-icon.busy { border-color: var(--warn); opacity: 0.7; }
+
+/* ping ripple when peer appears */
+@keyframes ping-appear {
+  0%   { box-shadow: 0 0 0 0 rgba(0,255,180,0.7); }
+  70%  { box-shadow: 0 0 0 16px rgba(0,255,180,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,255,180,0); }
+}
+.peer-icon.new-ping { animation: ping-appear 0.8s ease-out; }
+
+.peer-label {
+  position: absolute;
+  bottom: -20px; left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--accent2);
+  white-space: nowrap;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+/* Peer count badge */
+#peer-count {
+  position: absolute;
+  top: 16px; left: 16px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  z-index: 5;
+}
+#peer-count span { color: var(--accent); }
+
+/* ============================================================
+   SIDE PANEL
+   ============================================================ */
+#side-panel {
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* File drop zone */
+#drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+#drop-zone:hover, #drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(0,255,180,0.04);
+}
+#drop-zone .drop-icon { font-size: 2rem; margin-bottom: 8px; }
+#drop-zone p {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+#drop-zone strong { color: var(--text); }
+#file-input { display: none; }
+
+/* Target peer select */
+#target-display {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 8px 12px;
+  background: var(--panel);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+#target-display span { color: var(--accent2); }
+
+/* Send button */
+#send-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#send-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 20px rgba(0,255,180,0.4);
+}
+#send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Selected file info */
+#file-info {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  word-break: break-all;
+  display: none;
+}
+#file-info.visible { display: block; }
+
+/* Progress bars */
+.progress-item {
+  margin-bottom: 12px;
+}
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.progress-label .direction {
+  color: var(--accent);
+}
+.progress-label .direction.recv {
+  color: var(--accent2);
+}
+.progress-bar-bg {
+  height: 6px;
+  background: var(--panel);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+.progress-bar-fill.recv {
+  background: linear-gradient(90deg, var(--accent2), #007eff);
+}
+
+/* Log / activity */
+#log-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.log-entry {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(26,47,80,0.4);
+  display: flex;
+  gap: 8px;
+}
+.log-entry .ts { color: rgba(0,255,180,0.4); flex-shrink: 0; }
+.log-entry.ev-connect { color: var(--accent); }
+.log-entry.ev-recv    { color: var(--accent2); }
+.log-entry.ev-send    { color: #ffd66e; }
+.log-entry.ev-error   { color: var(--warn); }
+
+/* Progress section */
+#progress-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Toast notification */
+#toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0,255,180,0.2);
+  transition: transform 0.3s ease;
+  z-index: 100;
+  white-space: nowrap;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+
+/* Pairing animation overlay */
+#pair-anim {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  width: 60px; height: 60px;
+}
+@keyframes pair-pulse {
+  0%   { transform: translate(-50%,-50%) scale(1); opacity:0.8; }
+  100% { transform: translate(-50%,-50%) scale(3); opacity:0; }
+}
+#pair-anim.animating {
+  animation: pair-pulse 0.6s ease-out forwards;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 680px) {
+  #app {
+    grid-template-rows: 48px 1fr 280px;
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    height: auto;
+    min-height: 100vh;
+  }
+  #side-panel { border-left: none; border-top: 1px solid var(--border); }
+  .radar-wrap { width: min(85vw, 340px); height: min(85vw, 340px); }
+  #radar-area { min-height: 50vh; }
+  body, html { overflow: auto; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============================================================
+       HEADER
+  ============================================================ -->
+  <header>
+    <div class="logo">Drop<span>Wave</span></div>
+    <div id="my-id-display">
+      <span class="status-dot" id="status-dot"></span>
+      MY ID: <strong id="my-peer-id" title="Click to copy">connecting…</strong>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       RADAR AREA (main canvas)
+  ============================================================ -->
+  <div id="radar-area">
+    <div id="peer-count">PEERS ONLINE: <span id="peer-count-num">0</span></div>
+
+    <div class="radar-wrap" id="radar-wrap">
+      <!-- Rings -->
+      <div class="radar-ring"></div>
+      <div class="radar-ring"></div>
+      <div class="radar-ring"></div>
+
+      <!-- Crosshairs -->
+      <div class="crosshair-h"></div>
+      <div class="crosshair-v"></div>
+
+      <!-- Sweep -->
+      <div class="radar-sweep"></div>
+
+      <!-- Center = me -->
+      <div class="radar-center" title="You">🖥️</div>
+
+      <!-- Peer dots injected here by JS -->
+
+      <!-- Pairing animation element -->
+      <div id="pair-anim"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SIDE PANEL
+  ============================================================ -->
+  <div id="side-panel">
+
+    <!-- File picker -->
+    <div class="panel-section">
+      <div class="panel-title">Send File</div>
+
+      <div id="drop-zone">
+        <div class="drop-icon">📂</div>
+        <p><strong>Drag & drop</strong> a file here<br>or click to browse</p>
+        <input type="file" id="file-input">
+      </div>
+
+      <div id="file-info"></div>
+
+      <div style="margin-top:12px">
+        <div class="panel-title" style="margin-bottom:6px">Target Peer</div>
+        <div id="target-display">
+          → <span id="target-peer-label">none selected — click a dot on radar</span>
+        </div>
+      </div>
+
+      <button id="send-btn" disabled>⬆ SEND FILE</button>
+    </div>
+
+    <!-- Transfer progress -->
+    <div id="progress-section">
+      <div class="panel-title">Transfers</div>
+      <div id="progress-list"><span style="font-family:var(--mono);font-size:0.65rem;color:var(--text-dim)">no active transfers</span></div>
+    </div>
+
+    <!-- Activity log -->
+    <div class="panel-section" style="border-bottom:none; padding-bottom:4px">
+      <div class="panel-title">Activity Log</div>
+    </div>
+    <div id="log-list"></div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ============================================================
+     JAVASCRIPT
+     Sections:
+       1. State & helpers
+       2. PeerJS init & signaling (auto-discovery via broadcast channel)
+       3. Radar UI
+       4. WebRTC data channels & connection management
+       5. File transfer (chunked, with progress)
+       6. DOM events (drop zone, send button)
+============================================================ -->
+<script>
+// ============================================================
+// 1. STATE & HELPERS
+// ============================================================
+
+const CHUNK_SIZE   = 64 * 1024;      // 64 KB chunks
+const ROOM_KEY     = 'dropwave-room'; // BroadcastChannel name (same-origin tab discovery)
+const PEER_TIMEOUT = 30000;           // ms before a peer is removed from radar
+
+const state = {
+  myId:        null,
+  peer:        null,       // PeerJS instance
+  connections: {},         // peerId → DataConnection
+  peers:       {},         // peerId → { id, lastSeen, dotEl, angle, dist }
+  selectedPeer:null,
+  selectedFile:null,
+  transfers:   {},         // transferId → { name, total, received, el }
+  bc:          null,       // BroadcastChannel
+};
+
+// Random device emoji for visual identity
+const DEVICE_EMOJIS = ['💻','🖥️','📱','⌨️','🖱️','💾','📡','🖨️'];
+function randomEmoji() { return DEVICE_EMOJIS[Math.floor(Math.random()*DEVICE_EMOJIS.length)]; }
+
+// Short display ID
+function shortId(id) { return id ? id.slice(0, 8).toUpperCase() : '????'; }
+
+// Log to activity panel
+function addLog(msg, type = '') {
+  const list = document.getElementById('log-list');
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  entry.innerHTML = `<span class="ts">${ts}</span><span>${msg}</span>`;
+  list.prepend(entry);
+  // Keep max 80 entries
+  while (list.children.length > 80) list.removeChild(list.lastChild);
+}
+
+// Toast notification
+function showToast(msg, duration = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+// Format bytes
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/(1024*1024)).toFixed(2) + ' MB';
+}
+
+// Generate unique transfer id
+function genTid() { return 'tx-' + Math.random().toString(36).slice(2,9); }
+
+
+// ============================================================
+// 2. PEERJSJS INIT & AUTO-DISCOVERY
+//    PeerJS Cloud handles signaling; data goes P2P via WebRTC.
+//    BroadcastChannel is used for same-origin tab discovery (LAN/local).
+// ============================================================
+
+function initPeer() {
+  // PeerJS connects to the free PeerJS Cloud signaling server.
+  // Each tab gets a random ID; we broadcast it via BroadcastChannel
+  // so other same-origin tabs discover us instantly.
+  state.peer = new Peer(undefined, {
+    host: '0.peerjs.com',
+    port: 443,
+    path: '/',
+    secure: true,
+    debug: 0,
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ]
+    }
+  });
+
+  state.peer.on('open', (id) => {
+    state.myId = id;
+    document.getElementById('my-peer-id').textContent = shortId(id);
+    document.getElementById('status-dot').classList.add('online');
+    addLog(`Connected to signaling server. My ID: ${shortId(id)}`, 'ev-connect');
+    showToast('🟢 Online — waiting for peers…');
+
+    // BroadcastChannel: announce to same-origin tabs
+    initBroadcast();
+    broadcastPresence();
+
+    // Periodic heartbeat so peers know we are still here
+    setInterval(broadcastPresence, 5000);
+    // Periodic cleanup of stale peers
+    setInterval(cleanStalePeers, 8000);
+  });
+
+  // Someone is connecting TO us
+  state.peer.on('connection', (conn) => {
+    addLog(`Incoming connection from ${shortId(conn.peer)}`, 'ev-connect');
+    handleConnection(conn);
+  });
+
+  state.peer.on('error', (err) => {
+    addLog(`PeerJS error: ${err.type}`, 'ev-error');
+    console.error(err);
+  });
+
+  state.peer.on('disconnected', () => {
+    addLog('Disconnected from signaling. Reconnecting…', 'ev-error');
+    state.peer.reconnect();
+  });
+}
+
+// BroadcastChannel: real-time tab-to-tab discovery (same origin)
+function initBroadcast() {
+  try {
+    state.bc = new BroadcastChannel(ROOM_KEY);
+    state.bc.onmessage = (ev) => {
+      const msg = ev.data;
+      if (!msg || msg.from === state.myId) return;
+
+      if (msg.type === 'HELLO' || msg.type === 'HEARTBEAT') {
+        upsertPeer(msg.from, msg.emoji);
+      }
+      if (msg.type === 'HELLO') {
+        // Reply so they see us too
+        state.bc.postMessage({ type: 'HEARTBEAT', from: state.myId, emoji: state.myEmoji });
+      }
+      if (msg.type === 'BYE') {
+        removePeer(msg.from);
+      }
+    };
+  } catch(e) {
+    addLog('BroadcastChannel not supported', 'ev-error');
+  }
+}
+
+function broadcastPresence() {
+  if (!state.bc || !state.myId) return;
+  state.bc.postMessage({ type: 'HEARTBEAT', from: state.myId, emoji: state.myEmoji });
+}
+
+// Announce departure
+window.addEventListener('beforeunload', () => {
+  if (state.bc && state.myId) {
+    state.bc.postMessage({ type: 'BYE', from: state.myId });
+  }
+});
+
+// Remove peers not seen in PEER_TIMEOUT ms
+function cleanStalePeers() {
+  const now = Date.now();
+  for (const [id, p] of Object.entries(state.peers)) {
+    if (now - p.lastSeen > PEER_TIMEOUT) {
+      removePeer(id);
+    }
+  }
+}
+
+
+// ============================================================
+// 3. RADAR UI
+// ============================================================
+
+function upsertPeer(peerId, emoji) {
+  if (peerId === state.myId) return;
+
+  if (state.peers[peerId]) {
+    // Already known — just update timestamp
+    state.peers[peerId].lastSeen = Date.now();
+    return;
+  }
+
+  // New peer — place on radar
+  const angle = Math.random() * 2 * Math.PI;
+  const dist  = 0.2 + Math.random() * 0.38; // 20%–58% of radar radius
+
+  state.peers[peerId] = { id: peerId, lastSeen: Date.now(), angle, dist, emoji: emoji || '💻' };
+  renderPeerDot(peerId);
+  updatePeerCount();
+  addLog(`Peer discovered: ${shortId(peerId)}`, 'ev-connect');
+}
+
+function renderPeerDot(peerId) {
+  const p = state.peers[peerId];
+  if (!p) return;
+
+  const wrap = document.getElementById('radar-wrap');
+  const w    = wrap.offsetWidth;
+  const h    = wrap.offsetHeight;
+  const cx   = w / 2;
+  const cy   = h / 2;
+  const r    = (w / 2) * p.dist;
+
+  const x = cx + r * Math.cos(p.angle);
+  const y = cy + r * Math.sin(p.angle);
+
+  const dot = document.createElement('div');
+  dot.className = 'peer-dot';
+  dot.id = `dot-${peerId}`;
+  dot.style.left = `${x}px`;
+  dot.style.top  = `${y}px`;
+
+  dot.innerHTML = `
+    <div class="peer-icon new-ping" id="icon-${peerId}">${p.emoji}</div>
+    <div class="peer-label">${shortId(peerId)}</div>
+  `;
+
+  // Remove ping class after animation
+  setTimeout(() => {
+    const icon = document.getElementById(`icon-${peerId}`);
+    if (icon) icon.classList.remove('new-ping');
+  }, 900);
+
+  dot.addEventListener('click', () => selectPeer(peerId, x, y));
+  wrap.appendChild(dot);
+  p.dotEl = dot;
+}
+
+function removePeer(peerId) {
+  const p = state.peers[peerId];
+  if (!p) return;
+  if (p.dotEl) p.dotEl.remove();
+  delete state.peers[peerId];
+  updatePeerCount();
+
+  if (state.selectedPeer === peerId) {
+    state.selectedPeer = null;
+    document.getElementById('target-peer-label').textContent = 'none selected — click a dot on radar';
+    updateSendButton();
+  }
+  addLog(`Peer left: ${shortId(peerId)}`, 'ev-error');
+}
+
+function updatePeerCount() {
+  document.getElementById('peer-count-num').textContent = Object.keys(state.peers).length;
+}
+
+// On window resize, re-render all peer dots
+window.addEventListener('resize', () => {
+  for (const peerId of Object.keys(state.peers)) {
+    const old = document.getElementById(`dot-${peerId}`);
+    if (old) old.remove();
+    renderPeerDot(peerId);
+  }
+});
+
+// Select a peer (click on radar dot)
+function selectPeer(peerId, x, y) {
+  state.selectedPeer = peerId;
+  document.getElementById('target-peer-label').textContent = shortId(peerId);
+
+  // Pairing animation
+  const anim = document.getElementById('pair-anim');
+  anim.style.left = `${x}px`;
+  anim.style.top  = `${y}px`;
+  anim.classList.remove('animating');
+  void anim.offsetWidth; // reflow
+  anim.classList.add('animating');
+
+  // Highlight icon
+  document.querySelectorAll('.peer-icon').forEach(el => el.classList.remove('connected'));
+  const icon = document.getElementById(`icon-${peerId}`);
+  if (icon) icon.classList.add('connected');
+
+  updateSendButton();
+  addLog(`Selected peer: ${shortId(peerId)}`);
+
+  // Open connection if not yet open
+  ensureConnection(peerId);
+}
+
+
+// ============================================================
+// 4. WEBRTC CONNECTION MANAGEMENT
+// ============================================================
+
+function ensureConnection(peerId) {
+  if (state.connections[peerId]) return state.connections[peerId];
+
+  addLog(`Opening data channel to ${shortId(peerId)}…`);
+  const conn = state.peer.connect(peerId, { reliable: true });
+  handleConnection(conn);
+  return conn;
+}
+
+function handleConnection(conn) {
+  state.connections[conn.peer] = conn;
+
+  conn.on('open', () => {
+    addLog(`Channel open with ${shortId(conn.peer)}`, 'ev-connect');
+    showToast(`✅ Connected to ${shortId(conn.peer)}`);
+    const icon = document.getElementById(`icon-${conn.peer}`);
+    if (icon) icon.classList.add('connected');
+    // Also add to radar if not already there
+    upsertPeer(conn.peer, '💻');
+  });
+
+  conn.on('data', (data) => handleIncomingData(conn.peer, data));
+
+  conn.on('close', () => {
+    addLog(`Channel closed with ${shortId(conn.peer)}`, 'ev-error');
+    delete state.connections[conn.peer];
+    const icon = document.getElementById(`icon-${conn.peer}`);
+    if (icon) icon.classList.remove('connected');
+  });
+
+  conn.on('error', (err) => {
+    addLog(`Channel error (${shortId(conn.peer)}): ${err}`, 'ev-error');
+  });
+}
+
+
+// ============================================================
+// 5. FILE TRANSFER (chunked)
+//    Protocol (JSON meta packet + ArrayBuffer chunk packets):
+//      Sender sends: { type:'meta', tid, name, size, totalChunks }
+//      Then N chunks: { type:'chunk', tid, index, data: <base64> }
+//      Receiver acks: { type:'ack', tid }
+// ============================================================
+
+// --- Sending ---
+function sendFile(file, peerId) {
+  const conn = ensureConnection(peerId);
+  const tid  = genTid();
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+  // Progress UI
+  createProgressBar(tid, file.name, totalChunks, false);
+  addLog(`Sending "${file.name}" (${fmtBytes(file.size)}) → ${shortId(peerId)}`, 'ev-send');
+
+  // Send meta packet
+  const meta = { type:'meta', tid, name: file.name, size: file.size, totalChunks };
+
+  function doSend() {
+    if (!conn.open) {
+      // Wait for channel to open
+      conn.on('open', () => sendChunks());
+    } else {
+      sendChunks();
+    }
+  }
+
+  function sendChunks() {
+    conn.send(JSON.stringify(meta));
+
+    let index = 0;
+    function sendNext() {
+      if (index >= totalChunks) {
+        addLog(`Sent "${file.name}" ✓`, 'ev-send');
+        showToast(`📤 Sent: ${file.name}`);
+        return;
+      }
+      const start  = index * CHUNK_SIZE;
+      const slice  = file.slice(start, start + CHUNK_SIZE);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        // Send chunk as base64 string (PeerJS handles serialization)
+        const b64 = btoa(
+          new Uint8Array(e.target.result).reduce((d,b) => d + String.fromCharCode(b), '')
+        );
+        conn.send(JSON.stringify({ type:'chunk', tid, index, data: b64 }));
+        updateProgress(tid, index + 1);
+        index++;
+        // Small yield to keep UI responsive
+        setTimeout(sendNext, 0);
+      };
+      reader.readAsArrayBuffer(slice);
+    }
+    sendChunks !== sendNext && sendNext();  // start
+  }
+
+  doSend();
+}
+
+// --- Receiving ---
+const incomingFiles = {}; // tid → { name, size, totalChunks, chunks:[] }
+
+function handleIncomingData(peerId, raw) {
+  let msg;
+  try {
+    msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch(e) {
+    return;
+  }
+
+  if (msg.type === 'meta') {
+    incomingFiles[msg.tid] = {
+      name: msg.name, size: msg.size,
+      totalChunks: msg.totalChunks, chunks: [],
+    };
+    createProgressBar(msg.tid, msg.name, msg.totalChunks, true);
+    addLog(`Receiving "${msg.name}" (${fmtBytes(msg.size)}) from ${shortId(peerId)}`, 'ev-recv');
+    showToast(`📥 Incoming: ${msg.name}`);
+  }
+
+  else if (msg.type === 'chunk') {
+    const inc = incomingFiles[msg.tid];
+    if (!inc) return;
+
+    // Decode base64 → Uint8Array
+    const bin    = atob(msg.data);
+    const bytes  = new Uint8Array(bin.length);
+    for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    inc.chunks[msg.index] = bytes;
+    const received = inc.chunks.filter(Boolean).length;
+    updateProgress(msg.tid, received);
+
+    if (received >= inc.totalChunks) {
+      // Reassemble
+      const blob = new Blob(inc.chunks);
+      triggerDownload(blob, inc.name);
+      addLog(`Received "${inc.name}" ✓ — downloaded`, 'ev-recv');
+      showToast(`✅ Download ready: ${inc.name}`, 3000);
+      delete incomingFiles[msg.tid];
+    }
+  }
+}
+
+// Trigger browser download
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+}
+
+// --- Progress bar helpers ---
+function createProgressBar(tid, name, total, isRecv) {
+  const list = document.getElementById('progress-list');
+
+  // Clear "no transfers" placeholder
+  if (list.querySelector('span')) list.innerHTML = '';
+
+  const item = document.createElement('div');
+  item.className = 'progress-item';
+  item.id = `prog-${tid}`;
+  item.innerHTML = `
+    <div class="progress-label">
+      <span class="direction ${isRecv?'recv':''}">${isRecv?'▼ RECV':'▲ SEND'}</span>
+      <span class="prog-name">${name.length > 22 ? name.slice(0,20)+'…' : name}</span>
+      <span class="prog-pct" id="pct-${tid}">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill ${isRecv?'recv':''}" id="fill-${tid}" style="width:0%"></div>
+    </div>
+  `;
+  list.prepend(item);
+  state.transfers[tid] = { total };
+}
+
+function updateProgress(tid, done) {
+  const t = state.transfers[tid];
+  if (!t) return;
+  const pct = Math.round((done / t.total) * 100);
+  const fill = document.getElementById(`fill-${tid}`);
+  const pctEl = document.getElementById(`pct-${tid}`);
+  if (fill) fill.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = pct + '%';
+
+  if (pct >= 100) {
+    setTimeout(() => {
+      const el = document.getElementById(`prog-${tid}`);
+      if (el) el.style.opacity = '0.4';
+    }, 2000);
+  }
+}
+
+
+// ============================================================
+// 6. DOM EVENTS
+// ============================================================
+
+// Copy my ID on click
+document.getElementById('my-peer-id').addEventListener('click', () => {
+  if (state.myId) {
+    navigator.clipboard.writeText(state.myId).catch(()=>{});
+    showToast('📋 ID copied to clipboard');
+  }
+});
+
+// File drop zone
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const fileInfo  = document.getElementById('file-info');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) setFile(fileInput.files[0]);
+});
+
+function setFile(file) {
+  state.selectedFile = file;
+  fileInfo.textContent = `📄 ${file.name} · ${fmtBytes(file.size)}`;
+  fileInfo.classList.add('visible');
+  updateSendButton();
+}
+
+function updateSendButton() {
+  const btn = document.getElementById('send-btn');
+  btn.disabled = !(state.selectedFile && state.selectedPeer);
+}
+
+document.getElementById('send-btn').addEventListener('click', () => {
+  if (state.selectedFile && state.selectedPeer) {
+    sendFile(state.selectedFile, state.selectedPeer);
+  }
+});
+
+
+// ============================================================
+// BOOT
+// ============================================================
+state.myEmoji = randomEmoji();
+initPeer();
+
+// Expose for debugging
+window._state = state;
+</script>
+
+</body>
+</html>
+<!-- ============================================================
+     SETUP INSTRUCTIONS (GitHub Pages)
+
+     1. Create a new GitHub repository (e.g. "dropwave")
+     2. Put this file as "index.html" in the root
+     3. Go to Settings → Pages → Branch: main / root → Save
+     4. Your app is live at: https://<username>.github.io/dropwave/
+
+     HOW PEER DISCOVERY WORKS:
+     - All tabs open on THE SAME ORIGIN automatically discover
+       each other via BroadcastChannel (instant, no server).
+     - For peers on different machines/browsers, they need to
+       share the same page URL. Peers connecting to the same
+       PeerJS Cloud signaling room will appear on each other's
+       radar once you add a "room code" feature (see below).
+
+     EXTENDING (ideas):
+     - Add a "room code" input → filter peers by room
+     - Add text chat over the same DataChannel
+     - Add multi-file queue (send multiple files)
+     - Add WebRTC stats (speed, ping)
+     - Add QR code of your peer ID for mobile scanning
+
+     SIGNALING SERVER:
+     - Uses free PeerJS Cloud (0.peerjs.com) — no setup needed.
+     - For production, self-host: https://github.com/peers/peerjs-server
+       (free on Railway, Render, Fly.io, etc.)
+============================================================ -->
