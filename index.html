@@ -2,724 +2,232 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DropWave — LAN File Sharing</title>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap');
+<title>P2P Share</title>
 
-:root {
-  --bg:      #04080f;
-  --surface: #080f1c;
-  --panel:   #0b1526;
-  --border:  #1a2f50;
-  --accent:  #00ffb4;
-  --accent2: #00cfff;
-  --warn:    #ff6b35;
-  --text:    #c8e0f4;
-  --dim:     #4a6a8a;
-  --mono:    'Share Tech Mono', monospace;
-  --sans:    'Exo 2', sans-serif;
-}
-*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-html,body { width:100%; height:100%; background:var(--bg); color:var(--text); font-family:var(--sans); overflow:hidden; }
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
 
-/* ── LAYOUT ── */
-#app { display:grid; grid-template-rows:56px 1fr; grid-template-columns:1fr 320px; height:100vh; }
-
-/* ── HEADER ── */
-header {
-  grid-column:1/-1; display:flex; align-items:center; justify-content:space-between;
-  padding:0 20px; border-bottom:1px solid var(--border); background:var(--surface); z-index:10;
-}
-.logo { font-family:var(--mono); font-size:1.15rem; letter-spacing:.12em; color:var(--accent); text-shadow:0 0 18px var(--accent); }
-.logo span { color:var(--accent2); }
-#hdr-right { display:flex; align-items:center; gap:14px; }
-#subnet-badge {
-  font-family:var(--mono); font-size:.68rem; color:var(--accent2);
-  background:rgba(0,207,255,.08); border:1px solid rgba(0,207,255,.2);
-  padding:4px 12px; border-radius:20px; letter-spacing:.06em; white-space:nowrap;
-}
-.status-pill { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:.68rem; color:var(--dim); }
-.sdot { width:8px; height:8px; border-radius:50%; background:var(--warn); box-shadow:0 0 8px var(--warn); transition:all .4s; }
-.sdot.on { background:var(--accent); box-shadow:0 0 10px var(--accent); animation:blink 2s infinite; }
-.sdot.scanning { background:var(--accent2); box-shadow:0 0 10px var(--accent2); animation:blink .6s infinite; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
-
-/* ── SPLASH (shown while detecting IP) ── */
-#splash {
-  position:fixed; inset:0; background:var(--bg);
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:18px; z-index:500;
-}
-#splash.hidden { display:none; }
-.splash-logo { font-family:var(--mono); font-size:2rem; color:var(--accent); text-shadow:0 0 30px var(--accent); letter-spacing:.15em; }
-.splash-logo span { color:var(--accent2); }
-.splash-sub { font-family:var(--mono); font-size:.78rem; color:var(--dim); letter-spacing:.1em; }
-.scan-ring {
-  width:80px; height:80px; border-radius:50%;
-  border:2px solid transparent;
-  border-top-color:var(--accent);
-  border-right-color:rgba(0,255,180,.3);
-  animation:spin 1s linear infinite;
-}
-@keyframes spin { to { transform:rotate(360deg); } }
-#splash-status { font-family:var(--mono); font-size:.72rem; color:var(--dim); text-align:center; max-width:300px; line-height:1.7; }
-
-/* ── RADAR ── */
-#radar-area {
-  position:relative; display:flex; align-items:center; justify-content:center;
-  overflow:hidden; background:radial-gradient(ellipse at center,#060e1c 0%,var(--bg) 75%);
-}
-#radar-area::before {
-  content:''; position:absolute; inset:0;
-  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
-  background-size:40px 40px; opacity:.2;
-}
-.rwrap { position:relative; width:min(68vw,500px); height:min(68vw,500px); }
-.ring { position:absolute; border-radius:50%; top:50%; left:50%; transform:translate(-50%,-50%); border:1px solid rgba(0,255,180,.15); }
-.ring:nth-child(1){width:100%;height:100%;border-color:rgba(0,255,180,.22);}
-.ring:nth-child(2){width:66%;height:66%;}
-.ring:nth-child(3){width:33%;height:33%;border-color:rgba(0,255,180,.1);}
-.ch{position:absolute;background:rgba(0,255,180,.09);top:50%;left:50%;}
-.ch-h{width:100%;height:1px;transform:translate(-50%,-50%);}
-.ch-v{width:1px;height:100%;transform:translate(-50%,-50%);}
-.sweep{position:absolute;width:50%;height:2px;top:50%;left:50%;transform-origin:0 50%;background:linear-gradient(90deg,transparent,rgba(0,255,180,.85));animation:sweep 3s linear infinite;border-radius:0 2px 2px 0;}
-.sweep::after{content:'';position:absolute;top:-44px;left:0;right:0;height:88px;background:conic-gradient(from -18deg at 0% 50%,transparent 0deg,rgba(0,255,180,.1) 55deg,transparent 75deg);}
-@keyframes sweep{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-.rcenter{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--accent);top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 20px var(--accent),0 0 40px rgba(0,255,180,.4);z-index:5;cursor:default;}
-#pc-label{position:absolute;top:14px;left:16px;font-family:var(--mono);font-size:.68rem;color:var(--dim);z-index:5;line-height:1.8;}
-#pc-label b{color:var(--accent);}
-#my-ip-label{position:absolute;bottom:14px;left:16px;font-family:var(--mono);font-size:.63rem;color:var(--dim);z-index:5;}
-#my-ip-label b{color:rgba(0,255,180,.6);}
-
-/* peer dots */
-.pdot{position:absolute;transform:translate(-50%,-50%);cursor:pointer;z-index:10;}
-.picon{width:46px;height:46px;border-radius:50%;background:var(--panel);border:2px solid var(--accent2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;transition:all .2s;box-shadow:0 0 14px rgba(0,207,255,.3);}
-.pdot:hover .picon{transform:scale(1.18);border-color:var(--accent);box-shadow:0 0 24px rgba(0,255,180,.5);}
-.picon.sel{border-color:var(--accent);box-shadow:0 0 24px rgba(0,255,180,.55);}
-.plabel{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:.58rem;color:var(--accent2);white-space:nowrap;opacity:.8;pointer-events:none;text-align:center;line-height:1.4;}
-@keyframes ping-in{0%{box-shadow:0 0 0 0 rgba(0,255,180,.8)}70%{box-shadow:0 0 0 20px rgba(0,255,180,0)}100%{box-shadow:0 0 0 0 rgba(0,255,180,0)}}
-.picon.ping{animation:ping-in .9s ease-out;}
-#pair-anim{position:absolute;border-radius:50%;border:2px solid var(--accent);opacity:0;pointer-events:none;z-index:20;width:60px;height:60px;}
-@keyframes pair-pulse{0%{transform:translate(-50%,-50%) scale(1);opacity:.8}100%{transform:translate(-50%,-50%) scale(3.2);opacity:0}}
-#pair-anim.go{animation:pair-pulse .6s ease-out forwards;}
-
-/* ── SIDE PANEL ── */
-#side-panel{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
-.psec{padding:14px 16px;border-bottom:1px solid var(--border);}
-.ptitle{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin-bottom:10px;}
-#dz{border:2px dashed var(--border);border-radius:10px;padding:20px 12px;text-align:center;cursor:pointer;transition:all .2s;}
-#dz:hover,#dz.over{border-color:var(--accent);background:rgba(0,255,180,.04);}
-#dz .di{font-size:1.8rem;margin-bottom:6px;}
-#dz p{font-size:.74rem;color:var(--dim);line-height:1.5;}
-#dz strong{color:var(--text);}
-#fi-inp{display:none;}
-#fi-info{margin-top:8px;font-family:var(--mono);font-size:.68rem;color:var(--dim);word-break:break-all;display:none;}
-#fi-info.v{display:block;}
-#tgt-box{margin-top:10px;font-family:var(--mono);font-size:.75rem;color:var(--dim);padding:7px 10px;background:var(--panel);border:1px solid var(--border);border-radius:8px;}
-#tgt-box b{color:var(--accent2);}
-#send-btn{width:100%;margin-top:10px;padding:9px;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:8px;font-family:var(--mono);font-size:.78rem;letter-spacing:.1em;cursor:pointer;transition:all .2s;}
-#send-btn:hover:not(:disabled){background:var(--accent);color:var(--bg);box-shadow:0 0 18px rgba(0,255,180,.4);}
-#send-btn:disabled{opacity:.3;cursor:not-allowed;}
-#prog-sec{padding:10px 14px;border-bottom:1px solid var(--border);max-height:180px;overflow-y:auto;}
-.pi{margin-bottom:10px;}
-.pl{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.62rem;color:var(--dim);margin-bottom:3px;}
-.pl .dir{color:var(--accent);}
-.pl .dir.r{color:var(--accent2);}
-.pb-bg{height:5px;background:var(--panel);border-radius:3px;overflow:hidden;border:1px solid var(--border);}
-.pb-fill{height:100%;border-radius:3px;transition:width .15s;background:linear-gradient(90deg,var(--accent),var(--accent2));}
-.pb-fill.r{background:linear-gradient(90deg,var(--accent2),#007eff);}
-#log-wrap{flex:1;overflow-y:auto;padding:10px 14px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
-.le{font-family:var(--mono);font-size:.62rem;color:var(--dim);padding:3px 0;border-bottom:1px solid rgba(26,47,80,.4);display:flex;gap:7px;}
-.le .ts{color:rgba(0,255,180,.35);flex-shrink:0;}
-.le.c{color:var(--accent);}.le.r{color:var(--accent2);}.le.s{color:#ffd66e;}.le.e{color:var(--warn);}
-
-#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--panel);border:1px solid var(--accent);color:var(--accent);font-family:var(--mono);font-size:.75rem;padding:9px 20px;border-radius:8px;box-shadow:0 4px 24px rgba(0,255,180,.2);transition:transform .3s ease;z-index:300;white-space:nowrap;}
-#toast.show{transform:translateX(-50%) translateY(0);}
-
-@media(max-width:660px){
-  #app{grid-template-rows:48px 1fr 260px;grid-template-columns:1fr;height:auto;min-height:100vh;}
-  #side-panel{border-left:none;border-top:1px solid var(--border);}
-  .rwrap{width:min(82vw,340px);height:min(82vw,340px);}
-  #radar-area{min-height:46vh;}
-  body,html{overflow:auto;}
-}
-</style>
 </head>
-<body>
 
-<!-- SPLASH SCREEN while detecting local IP -->
-<div id="splash">
-  <div class="splash-logo">Drop<span>Wave</span></div>
-  <div class="scan-ring"></div>
-  <div class="splash-sub">LAN P2P FILE SHARING</div>
-  <div id="splash-status">Detecting your local network…</div>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+
+<div class="bg-white w-full max-w-xl p-6 rounded-xl shadow space-y-4">
+
+<h1 class="text-2xl font-bold text-center">P2P File Share</h1>
+
+<div class="text-center text-sm text-gray-500">
+Scan QR antar device untuk connect
 </div>
 
-<div id="app">
-  <header>
-    <div class="logo">Drop<span>Wave</span></div>
-    <div id="hdr-right">
-      <div id="subnet-badge">🌐 LAN: <span id="subnet-lbl">detecting…</span></div>
-      <div class="status-pill">
-        <div class="sdot scanning" id="sdot"></div>
-        <span id="stxt">scanning…</span>
-      </div>
-    </div>
-  </header>
+<div class="grid grid-cols-2 gap-4">
 
-  <div id="radar-area">
-    <div id="pc-label">PEERS: <b id="pc">0</b></div>
-    <div id="my-ip-label">MY LAN IP: <b id="my-ip-lbl">—</b></div>
-    <div class="rwrap" id="rwrap">
-      <div class="ring"></div><div class="ring"></div><div class="ring"></div>
-      <div class="ch ch-h"></div><div class="ch ch-v"></div>
-      <div class="sweep"></div>
-      <div class="rcenter" title="You">🖥️</div>
-      <div id="pair-anim"></div>
-    </div>
-  </div>
+<button onclick="createOffer()" class="bg-blue-500 text-white p-2 rounded">
+Create QR
+</button>
 
-  <div id="side-panel">
-    <div class="psec">
-      <div class="ptitle">Send File</div>
-      <div id="dz">
-        <div class="di">📂</div>
-        <p><strong>Drag & drop</strong> a file here<br>or click to browse</p>
-        <input type="file" id="fi-inp">
-      </div>
-      <div id="fi-info"></div>
-      <div id="tgt-box">→ <b id="tgt-lbl">select a peer on the radar</b></div>
-      <button id="send-btn" disabled>⬆ SEND FILE</button>
-    </div>
-    <div id="prog-sec">
-      <div class="ptitle">Transfers</div>
-      <div id="prog-list"><span style="font-family:var(--mono);font-size:.62rem;color:var(--dim)">no active transfers</span></div>
-    </div>
-    <div class="psec" style="border-bottom:none;padding-bottom:4px"><div class="ptitle">Activity Log</div></div>
-    <div id="log-wrap"></div>
-  </div>
+<button onclick="startScanner()" class="bg-green-500 text-white p-2 rounded">
+Scan QR
+</button>
+
 </div>
 
-<div id="toast"></div>
+<div id="qrcode" class="flex justify-center"></div>
+
+<div id="reader" class="hidden"></div>
+
+<div id="dropZone" class="border-2 border-dashed rounded p-6 text-center text-gray-500">
+Drop file di sini atau pilih file
+<input type="file" id="fileInput" class="mt-2">
+</div>
+
+<button onclick="sendFile()" class="w-full bg-black text-white p-2 rounded">
+Send File
+</button>
+
+<div class="w-full bg-gray-200 rounded h-4">
+<div id="progress" class="bg-blue-500 h-4 rounded w-0"></div>
+</div>
+
+<div id="status" class="text-center text-sm text-gray-600">
+Not connected
+</div>
+
+<a id="download" class="hidden text-center text-blue-600 underline block">
+Download File
+</a>
+
+</div>
 
 <script>
-// ════════════════════════════════════════════════════════════════
-// DropWave v3 — Auto LAN Discovery
-//
-// HOW IT WORKS (no manual room entry needed):
-//
-//  1. DETECT LOCAL IP
-//     Browser can't directly read its local IP via JS, but we can
-//     extract it from WebRTC ICE candidates (host candidates
-//     contain the real LAN IP like 192.168.1.x).
-//
-//  2. DERIVE SUBNET KEY
-//     From IP "192.168.1.42" → subnet key = "192.168.1"
-//     All devices on the same /24 subnet get the same key.
-//
-//  3. DETERMINISTIC HUB PEER ID
-//     Hub peer ID = "dw-lan-" + subnet (e.g. "dw-lan-192.168.1")
-//     First device to connect claims this ID → becomes the hub.
-//     Others connect to it as members.
-//
-//  4. HUB BROADCASTS MEMBER LIST
-//     Hub relays {type:"MEMBERS", list:[...]} to all.
-//     Peers appear on radar automatically.
-//
-//  5. FILE TRANSFER
-//     Direct WebRTC DataChannel P2P between devices.
-//     Chunked at 64 KB, with progress bars.
-//     All data stays on LAN — never touches the internet.
-// ════════════════════════════════════════════════════════════════
 
-const CHUNK = 64 * 1024;
+const chunkSize = 16000
 
-// ── STATE ──────────────────────────────────────────────────────
-const S = {
-  myId: null, myEmoji: rndEmoji(), myIP: null, subnet: null,
-  peer: null,
-  isHub: false,
-  hubMembers: {}, memberConns: {},
-  hubConn: null,
-  directConns: {},
-  peers: {}, selPeer: null, selFile: null, transfers: {},
-};
+let pc = new RTCPeerConnection({
+iceServers:[{urls:"stun:stun.l.google.com:19302"}]
+})
 
-function rndEmoji(){ return ['💻','🖥️','📱','⌨️','🎮','📡','🤖','🖱️','💾','📲'][Math.random()*10|0]; }
-function short(id){ return id ? id.slice(0,8).toUpperCase() : '????'; }
-function fmtB(b){ return b<1024?b+' B':b<1<<20?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(2)+' MB'; }
-function genTid(){ return 'tx'+Math.random().toString(36).slice(2,9); }
-function tsNow(){ const d=new Date(); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(x=>(''+x).padStart(2,'0')).join(':'); }
-function parse(raw){ try{ return typeof raw==='string'?JSON.parse(raw):raw; }catch(e){ return null; } }
+let channel
+let received = []
+let receivedSize = 0
 
-function toast(msg,ms=2600){
-  const t=document.getElementById('toast');
-  t.textContent=msg; t.classList.add('show');
-  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),ms);
-}
-function log(msg,cls=''){
-  const w=document.getElementById('log-wrap');
-  const d=document.createElement('div'); d.className='le '+cls;
-  d.innerHTML=`<span class="ts">${tsNow()}</span><span>${msg}</span>`;
-  w.prepend(d); if(w.children.length>120) w.removeChild(w.lastChild);
-}
-function setSplashStatus(txt){ document.getElementById('splash-status').textContent=txt; }
-
-// ── STEP 1: DETECT LOCAL IP via WebRTC ICE ─────────────────────
-// We create a dummy RTCPeerConnection and inspect ICE candidates.
-// Host candidates expose the real LAN IP (192.168.x.x, 10.x.x.x, etc.)
-function detectLocalIP() {
-  return new Promise((resolve) => {
-    const candidates = [];
-    const pc = new RTCPeerConnection({ iceServers: [] });
-
-    // Need a data channel to trigger ICE gathering
-    pc.createDataChannel('');
-
-    pc.onicecandidate = (e) => {
-      if (!e.candidate) {
-        // Gathering complete
-        pc.close();
-        const ip = pickBestIP(candidates);
-        resolve(ip);
-        return;
-      }
-      // Parse IP from candidate string
-      // Format: "candidate:... IP port ..."
-      const parts = e.candidate.candidate.split(' ');
-      const ip = parts[4];
-      if (ip && isPrivateIP(ip)) {
-        candidates.push(ip);
-      }
-    };
-
-    pc.createOffer().then(sdp => pc.setLocalDescription(sdp));
-
-    // Fallback: if ICE gathering takes too long
-    setTimeout(() => {
-      pc.close();
-      const ip = pickBestIP(candidates);
-      resolve(ip || null);
-    }, 4000);
-  });
+pc.ondatachannel=e=>{
+channel=e.channel
+setupChannel()
 }
 
-function isPrivateIP(ip) {
-  // Match RFC-1918 private ranges only (real LAN IPs)
-  return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
+function setupChannel(){
+
+channel.onopen=()=>status("Connected")
+
+channel.onmessage=e=>{
+
+if(typeof e.data === "string"){
+let meta=JSON.parse(e.data)
+window.fileMeta=meta
+return
 }
 
-function pickBestIP(list) {
-  if (!list.length) return null;
-  // Prefer 192.168.x.x, then 10.x.x.x, then 172.16.x.x
-  return list.find(ip => ip.startsWith('192.168.')) ||
-         list.find(ip => ip.startsWith('10.'))       ||
-         list[0];
+received.push(e.data)
+receivedSize+=e.data.byteLength
+
+updateProgress(receivedSize/window.fileMeta.size*100)
+
+if(receivedSize===window.fileMeta.size){
+
+let blob=new Blob(received)
+let url=URL.createObjectURL(blob)
+
+let a=document.getElementById("download")
+a.href=url
+a.download=window.fileMeta.name
+a.classList.remove("hidden")
+
+status("File received")
+
 }
 
-function ipToSubnet(ip) {
-  // For /24: "192.168.1.42" → "192.168.1"
-  return ip.split('.').slice(0, 3).join('.');
 }
 
-function hubIdForSubnet(subnet) {
-  // Deterministic hub peer ID derived from subnet
-  // e.g. "dw-lan-192.168.1"
-  return 'dw-lan-' + subnet.replace(/\./g, '-');
 }
 
-// ── STEP 2: BOOT PEERJS ────────────────────────────────────────
-function peerCfg() {
-  return {
-    host: '0.peerjs.com', port: 443, path: '/', secure: true, debug: 0,
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' },
-      ]
-    }
-  };
+function status(t){
+document.getElementById("status").innerText=t
 }
 
-function setOnline(label) {
-  document.getElementById('sdot').classList.remove('scanning');
-  document.getElementById('sdot').classList.add('on');
-  document.getElementById('stxt').textContent = label;
+function updateProgress(p){
+document.getElementById("progress").style.width=p+"%"
 }
 
-function startWithSubnet(subnet) {
-  S.subnet = subnet;
-  document.getElementById('subnet-lbl').textContent = subnet + '.x';
-  document.getElementById('my-ip-lbl').textContent = S.myIP || subnet + '.?';
-  log('Subnet detected: ' + subnet + '.0/24', 'c');
+async function createOffer(){
 
-  // Try to become hub first
-  const hid = hubIdForSubnet(subnet);
-  log('Trying hub ID: ' + hid);
+channel=pc.createDataChannel("file")
+setupChannel()
 
-  S.peer = new Peer(hid, peerCfg());
+let offer=await pc.createOffer()
+await pc.setLocalDescription(offer)
 
-  S.peer.on('open', id => {
-    S.myId = id; S.isHub = true;
-    S.hubMembers[id] = { emoji: S.myEmoji, ip: S.myIP };
-    setOnline('HUB');
-    log('Became hub for subnet ' + subnet, 'c');
-    toast('🏠 Hub active — waiting for peers on ' + subnet + '.x');
-    hideSplash();
-  });
+let data=btoa(JSON.stringify(offer))
 
-  S.peer.on('connection', conn => {
-    if (S.isHub) handleMemberConn(conn);
-    else         handleDirectConn(conn);
-  });
+document.getElementById("qrcode").innerHTML=""
 
-  S.peer.on('error', err => {
-    if (err.type === 'unavailable-id') {
-      // Hub already exists on this subnet → connect as member
-      log('Hub exists, joining as member…');
-      connectAsMember(subnet);
-      return;
-    }
-    log('PeerJS error: ' + err.type, 'e');
-    if (['network','server-error','socket-error','socket-closed'].includes(err.type)) {
-      setTimeout(() => startWithSubnet(subnet), 3000);
-    }
-  });
+QRCode.toCanvas(data,{width:200},(err,canvas)=>{
+document.getElementById("qrcode").appendChild(canvas)
+})
 
-  S.peer.on('disconnected', () => {
-    log('Disconnected, reconnecting…', 'e');
-    document.getElementById('sdot').classList.remove('on');
-    setTimeout(() => { try { S.peer.reconnect(); } catch(e) { startWithSubnet(subnet); } }, 2000);
-  });
 }
 
-// ── HUB: handle incoming member connections ────────────────────
-function handleMemberConn(conn) {
-  const pid = conn.peer;
-  conn.on('open', () => {
-    log('Member connected: ' + short(pid), 'c');
-    S.memberConns[pid] = conn;
-    S.directConns[pid] = conn;
-  });
-  conn.on('data', raw => {
-    const msg = parse(raw); if (!msg) return;
-    if (msg.type === 'JOIN') {
-      S.hubMembers[pid] = { emoji: msg.emoji, ip: msg.ip };
-      upsertPeer(pid, msg.emoji, msg.ip);
-      broadcastMembers();
-    }
-    if (msg.type === 'HB') {
-      if (!S.hubMembers[pid]) { S.hubMembers[pid] = { emoji: msg.emoji || '💻', ip: msg.ip }; broadcastMembers(); }
-    }
-    if (msg.type === 'meta' || msg.type === 'chunk') handleIncoming(pid, msg);
-  });
-  conn.on('close', () => {
-    log('Member left: ' + short(pid), 'e');
-    delete S.hubMembers[pid]; delete S.memberConns[pid]; delete S.directConns[pid];
-    removePeer(pid); broadcastMembers();
-  });
-  conn.on('error', () => {
-    delete S.hubMembers[pid]; delete S.memberConns[pid]; delete S.directConns[pid];
-    removePeer(pid); broadcastMembers();
-  });
+async function handleOffer(data){
+
+let offer=JSON.parse(atob(data))
+
+await pc.setRemoteDescription(offer)
+
+let answer=await pc.createAnswer()
+await pc.setLocalDescription(answer)
+
+let encoded=btoa(JSON.stringify(answer))
+
+document.getElementById("qrcode").innerHTML=""
+
+QRCode.toCanvas(encoded,{width:200},(err,canvas)=>{
+document.getElementById("qrcode").appendChild(canvas)
+})
+
 }
 
-function broadcastMembers() {
-  const list = Object.entries(S.hubMembers).map(([id, d]) => ({ id, emoji: d.emoji, ip: d.ip }));
-  const msg  = JSON.stringify({ type: 'MEMBERS', list });
-  for (const c of Object.values(S.memberConns)) {
-    try { if (c.open) c.send(msg); } catch(e) {}
-  }
+async function handleAnswer(data){
+
+let answer=JSON.parse(atob(data))
+await pc.setRemoteDescription(answer)
+
 }
 
-// ── MEMBER: connect to hub ─────────────────────────────────────
-function connectAsMember(subnet) {
-  if (S.peer) { try { S.peer.destroy(); } catch(e) {} }
-  S.isHub = false;
+function startScanner(){
 
-  S.peer = new Peer(undefined, peerCfg());
-  S.peer.on('open', id => {
-    S.myId = id;
-    setOnline(short(id));
-    log('Online as ' + short(id) + ' — connecting to hub…', 'c');
-    hideSplash();
-    openHubConn(subnet);
-  });
-  S.peer.on('connection', conn => handleDirectConn(conn));
-  S.peer.on('error', err => {
-    log('Peer error: ' + err.type, 'e');
-    setTimeout(() => startWithSubnet(subnet), 3000);
-  });
-  S.peer.on('disconnected', () => {
-    log('Disconnected…', 'e');
-    document.getElementById('sdot').classList.remove('on');
-    setTimeout(() => { try { S.peer.reconnect(); } catch(e) { startWithSubnet(subnet); } }, 2000);
-  });
+document.getElementById("reader").classList.remove("hidden")
+
+let scanner=new Html5Qrcode("reader")
+
+scanner.start(
+{facingMode:"environment"},
+{fps:10,qrbox:250},
+msg=>{
+
+scanner.stop()
+
+if(!pc.remoteDescription){
+handleOffer(msg)
+}else{
+handleAnswer(msg)
 }
 
-function openHubConn(subnet) {
-  const hid = hubIdForSubnet(subnet);
-  log('Connecting to hub ' + hid + '…');
-  const conn = S.peer.connect(hid, { reliable: true });
-  S.hubConn = conn;
+}
+)
 
-  conn.on('open', () => {
-    log('Connected to hub ✓', 'c');
-    toast('✅ Joined LAN room: ' + subnet + '.x');
-    conn.send(JSON.stringify({ type: 'JOIN', emoji: S.myEmoji, ip: S.myIP }));
-    clearInterval(S._hb);
-    S._hb = setInterval(() => {
-      try { if (conn.open) conn.send(JSON.stringify({ type: 'HB', emoji: S.myEmoji, ip: S.myIP })); } catch(e) {}
-    }, 8000);
-  });
-
-  conn.on('data', raw => {
-    const msg = parse(raw); if (!msg) return;
-    if (msg.type === 'MEMBERS') syncMembers(msg.list);
-    if (msg.type === 'meta' || msg.type === 'chunk') handleIncoming(hid, msg);
-  });
-
-  conn.on('close', () => {
-    log('Hub left — reclaiming hub slot…', 'e');
-    clearInterval(S._hb);
-    clearAllPeers();
-    setTimeout(() => startWithSubnet(subnet), 1500);
-  });
-
-  conn.on('error', () => {
-    clearInterval(S._hb);
-    setTimeout(() => startWithSubnet(subnet), 3000);
-  });
 }
 
-function syncMembers(list) {
-  const ids = new Set(list.map(p => p.id));
-  for (const p of list) { if (p.id !== S.myId) upsertPeer(p.id, p.emoji, p.ip); }
-  for (const id of Object.keys(S.peers)) { if (!ids.has(id)) removePeer(id); }
+async function sendFile(){
+
+let file=document.getElementById("fileInput").files[0]
+if(!file) return
+
+channel.send(JSON.stringify({
+name:file.name,
+size:file.size
+}))
+
+let offset=0
+
+while(offset<file.size){
+
+let slice=file.slice(offset,offset+chunkSize)
+let buffer=await slice.arrayBuffer()
+
+channel.send(buffer)
+
+offset+=chunkSize
+
+updateProgress(offset/file.size*100)
+
 }
 
-// ── DIRECT CONNECTIONS ─────────────────────────────────────────
-function handleDirectConn(conn) {
-  conn.on('open', () => {
-    S.directConns[conn.peer] = conn;
-    log('Direct channel: ' + short(conn.peer), 'c');
-  });
-  conn.on('data', raw => {
-    const msg = parse(raw); if (!msg) return;
-    if (msg.type === 'meta' || msg.type === 'chunk') handleIncoming(conn.peer, msg);
-  });
-  conn.on('close', () => { delete S.directConns[conn.peer]; });
+status("File sent")
+
 }
 
-function ensureDirect(pid) {
-  if (S.directConns[pid]?.open) return S.directConns[pid];
-  const c = S.peer.connect(pid, { reliable: true });
-  handleDirectConn(c);
-  S.directConns[pid] = c;
-  return c;
+let drop=document.getElementById("dropZone")
+
+drop.ondragover=e=>{
+e.preventDefault()
 }
 
-// ── RADAR ──────────────────────────────────────────────────────
-function upsertPeer(id, emoji, ip) {
-  if (id === S.myId) return;
-  if (S.peers[id]) return; // already shown
-  const angle = Math.random() * 2 * Math.PI;
-  const dist  = 0.2 + Math.random() * 0.36;
-  S.peers[id] = { emoji: emoji || '💻', ip: ip || '?', angle, dist };
-  renderDot(id);
-  updatePc();
-  log('Peer found: ' + short(id) + (ip ? ' [' + ip + ']' : ''), 'c');
-  toast('👀 ' + (ip || short(id)) + ' joined the LAN');
+drop.ondrop=e=>{
+e.preventDefault()
+document.getElementById("fileInput").files=e.dataTransfer.files
 }
 
-function renderDot(id) {
-  const p = S.peers[id]; if (!p) return;
-  const W = document.getElementById('rwrap');
-  const w = W.offsetWidth, h = W.offsetHeight;
-  const r = (w / 2) * p.dist;
-  const x = w / 2 + r * Math.cos(p.angle);
-  const y = h / 2 + r * Math.sin(p.angle);
-  const el = document.createElement('div');
-  el.className = 'pdot'; el.id = 'pdot-' + id;
-  el.style.cssText = 'left:' + x + 'px;top:' + y + 'px';
-  const ipShort = p.ip && p.ip !== '?' ? p.ip.split('.').pop() : '';
-  const label   = (p.ip && p.ip !== '?') ? p.ip : short(id);
-  el.innerHTML  = '<div class="picon ping" id="picon-' + id + '">' + p.emoji + '</div>'
-                + '<div class="plabel">' + label + '</div>';
-  setTimeout(() => { const ic = document.getElementById('picon-' + id); if (ic) ic.classList.remove('ping'); }, 900);
-  el.onclick = () => selectPeer(id, x, y);
-  W.appendChild(el);
-  p.dotEl = el;
-}
-
-function removePeer(id) {
-  const p = S.peers[id]; if (!p) return;
-  if (p.dotEl) p.dotEl.remove();
-  delete S.peers[id]; delete S.directConns[id];
-  updatePc();
-  if (S.selPeer === id) {
-    S.selPeer = null;
-    document.getElementById('tgt-lbl').textContent = 'select a peer on the radar';
-    updateSendBtn();
-  }
-  log('Peer left: ' + short(id), 'e');
-}
-
-function clearAllPeers() { for (const id of Object.keys(S.peers)) removePeer(id); }
-function updatePc() { document.getElementById('pc').textContent = Object.keys(S.peers).length; }
-
-function selectPeer(id, x, y) {
-  S.selPeer = id;
-  const p = S.peers[id];
-  document.getElementById('tgt-lbl').textContent = (p && p.ip && p.ip !== '?') ? p.ip : short(id);
-  document.querySelectorAll('.picon').forEach(el => el.classList.remove('sel'));
-  const ic = document.getElementById('picon-' + id); if (ic) ic.classList.add('sel');
-  const a = document.getElementById('pair-anim');
-  a.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:60px;height:60px';
-  a.classList.remove('go'); void a.offsetWidth; a.classList.add('go');
-  updateSendBtn(); ensureDirect(id);
-  log('Selected: ' + ((p && p.ip) ? p.ip : short(id)));
-}
-
-window.addEventListener('resize', () => {
-  for (const id of Object.keys(S.peers)) {
-    const e = document.getElementById('pdot-' + id); if (e) e.remove();
-    renderDot(id);
-  }
-});
-
-// ── FILE TRANSFER ──────────────────────────────────────────────
-function sendFile(file, pid) {
-  const conn = ensureDirect(pid);
-  const tid  = genTid();
-  const total = Math.ceil(file.size / CHUNK);
-  mkProg(tid, file.name, total, false);
-  log('Sending "' + file.name + '" (' + fmtB(file.size) + ') → ' + short(pid), 's');
-
-  function go() {
-    conn.send(JSON.stringify({ type: 'meta', tid, name: file.name, size: file.size, totalChunks: total }));
-    let i = 0;
-    function nxt() {
-      if (i >= total) { log('Sent "' + file.name + '" ✓', 's'); toast('📤 Sent: ' + file.name); return; }
-      const reader = new FileReader();
-      reader.onload = e => {
-        const b64 = btoa(new Uint8Array(e.target.result).reduce((a, b) => a + String.fromCharCode(b), ''));
-        conn.send(JSON.stringify({ type: 'chunk', tid, index: i, data: b64 }));
-        updProg(tid, i + 1);
-        i++;
-        setTimeout(nxt, 0);
-      };
-      reader.readAsArrayBuffer(file.slice(i * CHUNK, (i + 1) * CHUNK));
-    }
-    nxt();
-  }
-
-  if (conn.open) go(); else conn.on('open', go);
-}
-
-const recvMap = {};
-function handleIncoming(from, msg) {
-  if (msg.type === 'meta') {
-    recvMap[msg.tid] = { name: msg.name, size: msg.size, total: msg.totalChunks, chunks: [] };
-    mkProg(msg.tid, msg.name, msg.totalChunks, true);
-    log('Receiving "' + msg.name + '" (' + fmtB(msg.size) + ') from ' + short(from), 'r');
-    toast('📥 Incoming: ' + msg.name);
-  }
-  if (msg.type === 'chunk') {
-    const inc = recvMap[msg.tid]; if (!inc) return;
-    const bin = atob(msg.data);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    inc.chunks[msg.index] = bytes;
-    const got = inc.chunks.filter(Boolean).length;
-    updProg(msg.tid, got);
-    if (got >= inc.total) {
-      const url = URL.createObjectURL(new Blob(inc.chunks));
-      const a = Object.assign(document.createElement('a'), { href: url, download: inc.name });
-      document.body.appendChild(a); a.click();
-      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
-      log('Downloaded "' + inc.name + '" ✓', 'r');
-      toast('✅ Saved: ' + inc.name, 3200);
-      delete recvMap[msg.tid];
-    }
-  }
-}
-
-function mkProg(tid, name, total, isRecv) {
-  const list = document.getElementById('prog-list');
-  if (list.querySelector('span')) list.innerHTML = '';
-  const d = document.createElement('div'); d.className = 'pi'; d.id = 'pi-' + tid;
-  const sn = name.length > 22 ? name.slice(0, 20) + '…' : name;
-  d.innerHTML = '<div class="pl"><span class="dir ' + (isRecv ? 'r' : '') + '">' + (isRecv ? '▼ RECV' : '▲ SEND') + '</span><span>' + sn + '</span><span id="pct-' + tid + '">0%</span></div>'
-              + '<div class="pb-bg"><div class="pb-fill ' + (isRecv ? 'r' : '') + '" id="pb-' + tid + '" style="width:0%"></div></div>';
-  list.prepend(d);
-  S.transfers[tid] = { total };
-}
-
-function updProg(tid, done) {
-  const t = S.transfers[tid]; if (!t) return;
-  const p = Math.round(done / t.total * 100);
-  const pb = document.getElementById('pb-' + tid), pct = document.getElementById('pct-' + tid);
-  if (pb) pb.style.width = p + '%'; if (pct) pct.textContent = p + '%';
-  if (p >= 100) setTimeout(() => { const el = document.getElementById('pi-' + tid); if (el) el.style.opacity = '.35'; }, 2500);
-}
-
-// ── DOM EVENTS ─────────────────────────────────────────────────
-const dz = document.getElementById('dz'), fi = document.getElementById('fi-inp');
-dz.onclick = () => fi.click();
-dz.ondragover = e => { e.preventDefault(); dz.classList.add('over'); };
-dz.ondragleave = () => dz.classList.remove('over');
-dz.ondrop = e => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); };
-fi.onchange = () => { if (fi.files[0]) setFile(fi.files[0]); };
-
-function setFile(f) {
-  S.selFile = f;
-  const el = document.getElementById('fi-info');
-  el.textContent = '📄 ' + f.name + ' · ' + fmtB(f.size);
-  el.classList.add('v');
-  updateSendBtn();
-}
-function updateSendBtn() { document.getElementById('send-btn').disabled = !(S.selFile && S.selPeer); }
-document.getElementById('send-btn').onclick = () => { if (S.selFile && S.selPeer) sendFile(S.selFile, S.selPeer); };
-
-// ── SPLASH ─────────────────────────────────────────────────────
-function hideSplash() {
-  setTimeout(() => document.getElementById('splash').classList.add('hidden'), 400);
-}
-
-// ── MAIN ENTRY POINT ───────────────────────────────────────────
-(async function main() {
-  setSplashStatus('Detecting local IP via WebRTC…\n(allow network access if prompted)');
-  log('Detecting local IP…');
-
-  let ip = null;
-  try {
-    ip = await detectLocalIP();
-  } catch(e) {
-    log('IP detection failed: ' + e, 'e');
-  }
-
-  if (ip) {
-    S.myIP = ip;
-    const subnet = ipToSubnet(ip);
-    setSplashStatus('Local IP: ' + ip + '\nSubnet: ' + subnet + '.0/24\nJoining LAN room…');
-    log('Local IP: ' + ip, 'c');
-    startWithSubnet(subnet);
-  } else {
-    // Fallback: IP detection failed (can happen in some browsers/environments)
-    // Use a fixed fallback subnet so all users still share a room
-    log('Could not detect local IP. Using fallback subnet.', 'e');
-    setSplashStatus('⚠️ Could not detect LAN IP.\nUsing shared fallback.\n\nAll devices on this page will connect.');
-    toast('⚠️ LAN detection failed — using fallback', 4000);
-    // Small delay so user can read the message
-    await new Promise(r => setTimeout(r, 1500));
-    startWithSubnet('lan-fallback');
-    hideSplash();
-  }
-})();
 </script>
+
 </body>
 </html>
