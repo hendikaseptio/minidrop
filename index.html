@@ -121,17 +121,20 @@ document.getElementById("progress").style.width=p+"%"
 
 async function createOffer(){
 
-channel=pc.createDataChannel("file")
+channel = pc.createDataChannel("file")
 setupChannel()
 
-let offer=await pc.createOffer()
+let offer = await pc.createOffer()
 await pc.setLocalDescription(offer)
 
-let data=btoa(JSON.stringify(offer))
+let data = btoa(unescape(encodeURIComponent(JSON.stringify(offer))))
 
 document.getElementById("qrcode").innerHTML=""
 
-QRCode.toCanvas(data,{width:200},(err,canvas)=>{
+QRCode.toCanvas(data,{
+width:300,
+errorCorrectionLevel:"L"
+},(err,canvas)=>{
 document.getElementById("qrcode").appendChild(canvas)
 })
 
@@ -176,10 +179,18 @@ msg=>{
 
 scanner.stop()
 
+try{
+
+let decoded = decodeURIComponent(escape(atob(msg)))
+
 if(!pc.remoteDescription){
-handleOffer(msg)
+handleOffer(btoa(decoded))
 }else{
-handleAnswer(msg)
+handleAnswer(btoa(decoded))
+}
+
+}catch(e){
+alert("QR tidak valid")
 }
 
 }
